@@ -13,7 +13,7 @@ This project showcases an ESP32-based IoT system that reads temperature and humi
 
 ## Hardware Components
 1. **ESP32** - Microcontroller with Wi-Fi and Bluetooth capabilities.
-2. **HTU21D** - Temperature and Humidity sensor (I2C-based).
+2. **HTU21D** - Temperature and Humidity sensor (I2C-based)
 3. **HMT028ATB-C LCD** - Topway 2.8-inch touchscreen display.
 4. **Jumper Wires** - For interconnections.
 5. **Power Supply** - 5V/3.3V power source.
