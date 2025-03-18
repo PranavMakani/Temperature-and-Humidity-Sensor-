@@ -1,0 +1,139 @@
+#include <Wire.h>
+#include <Adafruit_HTU21DF.h>
+#include <HardwareSerial.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+
+// WiFi credentials
+const char* ssid = "AXIS100";
+const char* password = "Axis@#2023";
+
+// MQTT Broker details
+const char* mqtt_broker = "test.mosquitto.org";
+const int   mqtt_port   = 1883;
+const char* mqtt_sensor_topic = "esp32/sensor";
+
+// MQTT client setup
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+// UART Display Communication
+#define TX_PIN 22  // ESP32 TX (Connect to HMT028ATB-C RX)
+#define RX_PIN 21  // ESP32 RX (Connect to HMT028ATB-C TX)
+HardwareSerial mySerial(1);  // UART1 instance
+
+// Initialize HTU21D Sensor
+Adafruit_HTU21DF htu = Adafruit_HTU21DF();
+
+// MQTT Reconnect Function
+void reconnectMQTT() {
+  while (!mqttClient.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    String clientId = "ESP32_Client-";
+    clientId += String(random(0xffff), HEX);
+    if (mqttClient.connect(clientId.c_str())) {
+      Serial.println(" connected");
+    } else {
+      Serial.print(" failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+// Function to send text data to LCD Display
+void sendText(uint32_t address, String text) {
+  uint8_t command[6 + text.length() + 4];
+
+  command[0] = 0xAA;
+  command[1] = 0x44;
+  command[2] = (address >> 24) & 0xFF;
+  command[3] = (address >> 16) & 0xFF;
+  command[4] = (address >> 8) & 0xFF;
+  command[5] = address & 0xFF;
+
+  for (size_t i = 0; i < text.length(); i++) {
+    command[6 + i] = text[i];
+  }
+
+  command[6 + text.length()] = 0xCC;
+  command[7 + text.length()] = 0x33;
+  command[8 + text.length()] = 0xC3;
+  command[9 + text.length()] = 0x3C;
+
+  mySerial.write(command, sizeof(command));
+  Serial.print("Sent to LCD: ");
+  Serial.println(text);
+}
+
+// Setup Function
+void setup() {
+  Serial.begin(115200);
+  mySerial.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN); 
+  Wire.begin(13, 15);
+
+  // Initialize HTU21D Sensor
+  if (!htu.begin()) {
+    Serial.println("HTU21D sensor not found!");
+    while (1);
+  }
+
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  // Set up MQTT client
+  mqttClient.setServer(mqtt_broker, mqtt_port);
+
+  Serial.println("Setup Complete!");
+}
+
+// Loop Function
+void loop() {
+  if (!mqttClient.connected()) {
+    reconnectMQTT();
+  }
+  mqttClient.loop();
+
+  // Read Temperature and Humidity
+  float temperature = htu.readTemperature();
+  float humidity = htu.readHumidity();
+
+  if (!isnan(temperature) && !isnan(humidity)) {
+    String tempStr = String(temperature, 2) + " °C";
+    String humidityStr = String(humidity, 2) + " %";
+
+    Serial.print("Temp: ");
+    Serial.print(tempStr);
+    Serial.print("  Humidity: ");
+    Serial.println(humidityStr);
+
+    // Send Data to LCD (Use appropriate addresses for your LCD)
+    sendText(0x80000, tempStr);
+    sendText(0x80002, humidityStr);
+
+    // Build JSON Payload for Sensor Data
+    String sensorPayload = "{\"temperature\":";
+    sensorPayload += String(temperature, 2);
+    sensorPayload += ",\"humidity\":";
+    sensorPayload += String(humidity, 2);
+    sensorPayload += "}";
+
+    // Publish Sensor Data to MQTT
+    mqttClient.publish(mqtt_sensor_topic, sensorPayload.c_str());
+    Serial.print("Published Sensor Data: ");
+    Serial.println(sensorPayload);
+  } else {
+    Serial.println("Sensor reading failed!");
+  }
+
+  delay(2000);
+}
